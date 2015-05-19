@@ -44,7 +44,7 @@ use azure::{AzDrawTargetStroke, AzPathBuilderArc, AzPathBuilderFinish, AzRelease
 use azure::{AzDrawTargetFill, AzPathRef, AzReleasePath, AzDrawTargetPushClip, AzDrawTargetPopClip};
 use azure::{AzLinearGradientPatternRef, AzRadialGradientPatternRef, AzSurfacePatternRef, AzMatrix, AzPatternRef};
 use azure::{AzCreateLinearGradientPattern, AzCreateRadialGradientPattern, AzCreateSurfacePattern, AzDrawTargetPushClipRect};
-use azure::{AzCloneLinearGradientPattern, AzCloneRadialGradientPattern, AzCloneSurfacePattern};
+use azure::{AzCloneLinearGradientPattern, AzCloneRadialGradientPattern, AzCloneSurfacePattern, AzSurfacePatternGetSize};
 use azure::{AzDrawTargetDrawSurfaceWithShadow, AzDrawTargetCreateShadowDrawTarget};
 use azure::{AzDrawTargetCreateSimilarDrawTarget, AzDrawTargetGetTransform};
 use azure::{AzFilterNodeSetSourceSurfaceInput, AzReleaseFilterNode, AzDrawTargetCreateFilter};
@@ -538,9 +538,24 @@ impl DrawTarget {
             None => ptr::null_mut(),
             Some(ref mut draw_options) => draw_options as *mut AzDrawOptions
         };
+
+        let draw_rect = Rect(rect.origin,
+            match pattern {
+                PatternRef::Surface(surface) => {
+                    let surface_size = surface.size();
+                    match (surface.repeat_x, surface.repeat_y) {
+                        (true, true) => rect.size,
+                        (true, false) => Size2D(rect.size.width, surface_size.height as f32),
+                        (false, true) => Size2D(surface_size.width as f32, rect.size.height),
+                        (false, false) => Size2D(surface_size.width as f32, surface_size.height as f32),
+                    }
+                },
+                _ => rect.size,
+            }
+        );
         unsafe {
             AzDrawTargetFillRect(self.azure_draw_target,
-                                 &mut rect.as_azure_rect(),
+                                 &mut draw_rect.as_azure_rect(),
                                  pattern.as_azure_pattern(),
                                  draw_options);
         }
@@ -1155,6 +1170,8 @@ impl RadialGradientPattern {
 
 pub struct SurfacePattern {
     pub azure_surface_pattern: AzSurfacePatternRef,
+    pub repeat_x: bool,
+    pub repeat_y: bool,
 }
 
 impl Drop for SurfacePattern {
@@ -1171,19 +1188,29 @@ impl Clone for SurfacePattern {
             SurfacePattern {
                 azure_surface_pattern:
                     AzCloneSurfacePattern(self.azure_surface_pattern),
+                    repeat_x: self.repeat_x,
+                    repeat_y: self.repeat_y,
             }
         }
     }
 }
 
 impl SurfacePattern {
-    pub fn new(surface: AzSourceSurfaceRef)
+    pub fn new(surface: AzSourceSurfaceRef, repeat_x: bool, repeat_y: bool)
                -> SurfacePattern {
         unsafe {
             SurfacePattern {
                 azure_surface_pattern:
                     AzCreateSurfacePattern(surface),
+                    repeat_x: repeat_x,
+                    repeat_y: repeat_y,
             }
+        }
+    }
+
+    pub fn size(&self) -> AzIntSize {
+        unsafe {
+            AzSurfacePatternGetSize(self.azure_surface_pattern)
         }
     }
 }
